@@ -22,7 +22,7 @@ hosts:
   - {{ env['HOST'] }}.{{ env['DOMAIN'] }}
 
 host_config:
-  whalesanctuary.synology.me:
+  domain.tld:
     auth_method: ldap
     ldap_servers: 
       - slapd
