@@ -1,0 +1,149 @@
+version: '3.2'
+
+services:
+  ejabberd:
+    hostname: ${HOST?REQUIRED}
+    # image: ${EJABBERD_IMAGE:-ejabberd/ecs}:${EJABBERD_IMAGE_VERSION:-latest}
+    build: build/ejabberd
+    # environment:
+    #   ERLANG_NODE: "ejabberd@${HOST?REQUIRED}.${DOMAIN?REQUIRED}"
+    #   SPOOL_DIR: "/home/ejabberd/database/ejabberd@${HOST?REQUIRED}.${DOMAIN}"
+    volumes:
+      - "${CONTAINER_VOLUME?REQUIRED}/${SERIAL}/ejabberd/database:/home/ejabberd/database"
+      - "${CONTAINER_VOLUME?REQUIRED}/${SERIAL}/ejabberd/logs:/home/ejabberd/logs"
+      - "${CONTAINER_VOLUME?REQUIRED}/${SERIAL}/ejabberd/upload:/home/ejabberd/upload"
+      - "${PWD}/conf/ejabberd.yml:/home/ejabberd/conf/ejabberd.yml"
+      - "${PWD}/conf/macros.yml:/home/ejabberd/conf/macros.yml"
+      - "${PWD}/conf/certs:/home/ejabberd/conf/certs"
+    # command: [ "foreground", "--node", "ejabberd@${HOST?REQUIRED}.${DOMAIN}","--spool-dir", "/home/ejabberd/database/ejabberd@${HOST?REQUIRED}.${DOMAIN}" ]
+    ports:
+    - "5222:5222"
+    - "5280:5280"
+    - "5443:5443"
+    - "5269:5269"
+    # - "3478:3478"
+    depends_on: 
+    - db
+    - slapd
+    healthcheck:
+      test: [ "CMD", "bin/ejabberdctl", "status" ]
+      interval: 1m
+      timeout: 10s
+      retries: 5
+
+  slapd:
+    image: ${OPENLDAP_IMAGE:-osixia/openldap-backup}:${OPENLDAP_IMAGE_VERSION:-latest}
+    environment:
+      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD?REQUIRED}
+      LDAP_BASE_DN: ${LDAP_BASE_DN?REQUIRED}
+      LDAP_CONFIG_PASSWORD: ${LDAP_CONFIG_PASSWORD?REQUIRED}
+      LDAP_DOMAIN: ${LDAP_DOMAIN?REQUIRED}
+      LDAP_ORGANISATION: ${LDAP_ORGANISATION?REQUIRED}
+      LDAP_READONLY_USER: ${LDAP_READONLY_USER:-true}
+      LDAP_READONLY_USER_PASSWORD: ${LDAP_READONLY_USER_PASSWORD}
+      LDAP_RFC2307BIS_SCHEMA: ${LDAP_RFC2307BIS_SCHEMA:-true}
+      LDAP_TLS: ${LDAP_TLS:-true}
+      LDAP_TLS_VERIFY_CLIENT: ${LDAP_TLS_VERIFY_CLIENT:-true}
+    volumes:
+      - "${CONTAINER_VOLUME?REQUIRED}/${SERIAL}/openldap/var/lib/ldap/:/var/lib/ldap"
+      - "${CONTAINER_VOLUME?REQUIRED}/${SERIAL}/openldap/etc/ldap/slapd.d/:/etc/ldap/slapd.d"
+      - "${CONTAINER_VOLUME?REQUIRED}/${SERIAL}/openldap/certs/:/container/service/slapd/assets/certs"
+      - "${CONTAINER_VOLUME?REQUIRED}/${SERIAL}/openldap/backup/:/data/backup"
+    ports:
+      - "389:389"
+      # - "636:636"    
+    healthcheck:
+      test: [ "CMD", "ldapsearch", "-H", "ldapi://", "-Q", "-Y", "EXTERNAL", "-b", "cn=config", "-D", "cn=config", "-s", "base", "-LLL", "olcLoglevel" ]
+      interval: 1m
+      timeout: 10s
+      retries: 5
+
+  keycloak:
+    image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak}:${KEYCLOAK_IMAGE_VERSION:-latest}
+    environment:
+      KEYCLOAK_USER: ${KEYCLOAK_USER:-admin}
+      KEYCLOAK_PASSWORD: ${KEYCLOAK_PASSWORD?REQUIRED}
+      DB_ADDR: db
+      DB_VENDOR: postgres
+      DB_DATABASE: ${KEYCLOAK_DATABASE:-keycloak}
+      DB_USER: ${KEYCLOAK_POSTGRES_USER:-keycloak}
+      DB_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD?REQUIRED}
+      PROXY_ADDRESS_FORWARDING: ${PROXY_ADDRESS_FORWARDING:-true}
+      JAVA_OPTS_APPEND: ${JAVA_OPTS_APPEND}
+      ROOT_LOGLEVEL: ${KEYCLOAK_LOGLEVEL:-INFO}
+      KEYCLOAK_LOGLEVEL: ${KEYCLOAK_LOGLEVEL:-INFO}
+    ports:
+      - "${PORTBASE?REQUIRED}80:8080"
+    volumes:
+      - "${PWD}/whales:/opt/jboss/keycloak/themes/whales:rw"
+    depends_on: 
+    - slapd
+    - db
+    healthcheck:
+      test: [ "CMD", "curl", "--fail", "http://localhost:8080" ]
+      interval: 1m
+      timeout: 10s
+      retries: 5
+
+  db:
+    image: ${POSTGRES_IMAGE:-postgres}:${POSTGRES_IMAGE_VERSION:-12}
+    environment:
+      POSTGRES_DB:  "${POSTGRES_DB:-postgres}"
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD?REQUIRED}"
+      KEYCLOAK_DATABASE: ${KEYCLOAK_DATABASE:-keycloak}
+      KEYCLOAK_POSTGRES_USER: ${KEYCLOAK_POSTGRES_USER:-keycloak}
+      KEYCLOAK_POSTGRES_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:-keycloak}
+      EJABBERD_DATABASE: ${EJABBERD_DATABASE:-ejabberd}
+      EJABBERD_POSTGRES_USER: ${EJABBERD_POSTGRES_USER:-ejabberd}
+      EJABBERD_POSTGRES_PASSWORD: ${EJABBERD_POSTGRES_PASSWORD:-ejabberd}  
+      MOVIM_DATABASE: ${MOVIM_DATABASE:-movim}
+      MOVIM_POSTGRES_USER: ${MOVIM_POSTGRES_USER:-movim}
+      MOVIM_POSTGRES_PASSWORD: ${MOVIM_POSTGRES_PASSWORD:-movim}     
+    volumes:
+      - "${PWD}/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh"
+      - "${CONTAINER_VOLUME?REQUIRED}/${SERIAL?REQUIRED}/postgres:/var/lib/postgresql/data"
+    restart: always      
+    healthcheck:
+      test: [ "CMD", "psql", "-U", "postgres", "-d", "keycloak", "-c", "select version();" ]
+      interval: 1m
+      timeout: 10s
+      retries: 5
+
+  movim:
+    image: ${MOVIM_IMAGE:-movim/movim}:${MOVIM_IMAGE_VERSION:-0.19rc1}
+    environment:
+      MOVIM_ADMIN: ${MOVIM_ADMIN:-admin}
+      MOVIM_PASSWORD: ${MOVIM_PASSWORD?REQUIRED}
+      MOVIM_DOMAIN: ${MOVIM_DOMAIN:-http://localhost}
+      MOVIM_PORT: 8080
+      MOVIM_INTERFACE: 0.0.0.0
+      POSTGRES_DB: ${MOVIM_DATABASE:-movim}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${MOVIM_POSTGRES_USER:-movim}
+      POSTGRES_PASSWORD: ${MOVIM_POSTGRES_PASSWORD?REQUIRED}
+    volumes:
+    - "${CONTAINER_VOLUME?REQUIRED}/${SERIAL?REQUIRED}/movim:/var/www/html:rw"
+    depends_on: 
+      - db
+    healthcheck:
+      test: [ "CMD", "curl", "--fail", "http://localhost:8080/?login" ]
+      interval: 1m
+      timeout: 10s
+      retries: 5
+
+  nginx:
+    image: nginx:mainline-alpine
+    ports:
+    - "${PORTBASE?REQUIRED}81:80"
+    volumes:
+    - "${CONTAINER_VOLUME?REQUIRED}/${SERIAL?REQUIRED}/movim:/var/www/html:rw"
+    - "${PWD}/movim/nginx:/etc/nginx/conf.d:ro"
+    depends_on: 
+      - movim
+    healthcheck:
+      test: [ "CMD", "curl", "--fail", "http://localhost/?login" ]
+      interval: 1m
+      timeout: 10s
+      retries: 5      

@@ -1,0 +1,9 @@
+.env
+docker-compose.config.yml
+docker-compose.override.yml
+conf/certs/*
+*.bak
+ejabberd.yml
+nginx.conf
+create_realm.json
+create_ldap.json

@@ -1,0 +1,5 @@
+define_macro:
+  'EXTERNAL_IPV4': "86.8.158.231"
+  'STUN_PORT': 3478
+  # 'EXTERNAL_IPV4': "212.53.40.40"
+  # "$EXTERNAL_IPV4": "64.233.167.127"
